@@ -2298,7 +2298,7 @@ public class MediaProvider extends ContentProvider {
 
         // Used temporarily (until we have unique media IDs) to get an identifier
         // for the current sd card, so that the music app doesn't have to use the
-        // non-public getFatVolumeId method
+        // non-public getVolumeId method
         if (table == FS_ID) {
             MatrixCursor c = new MatrixCursor(new String[] {"fsid"});
             c.addRow(new Integer[] {mVolumeId});
@@ -2838,6 +2838,19 @@ public class MediaProvider extends ContentProvider {
                     mMtpService.sendObjectRemoved((int)objectHandle);
                 } catch (RemoteException e) {
                     Log.e(TAG, "RemoteException in sendObjectRemoved", e);
+                    mMtpService = null;
+                }
+            }
+        }
+    }
+
+    private void sendObjectUpdated(long objectHandle) {
+        synchronized (mMtpServiceConnection) {
+            if (mMtpService != null) {
+                try {
+                    mMtpService.sendObjectUpdated((int)objectHandle);
+                } catch (RemoteException e) {
+                    Log.e(TAG, "RemoteException in sendObjectUpdated", e);
                     mMtpService = null;
                 }
             }
@@ -4378,6 +4391,11 @@ public class MediaProvider extends ContentProvider {
                                         + count + " match = " + match);
                             }
                         }
+                        if (count > 0) {
+                            helper.mNumQueries++;
+                            notifyMtpUpdated(sGetTableAndWhereParam.table, db,
+                                    sGetTableAndWhereParam.where, whereArgs);
+                        }
                     }
                     break;
                 case IMAGES_MEDIA:
@@ -4422,6 +4440,11 @@ public class MediaProvider extends ContentProvider {
                                 }
                             }
                         }
+                        if (count > 0) {
+                            helper.mNumQueries++;
+                            notifyMtpUpdated(sGetTableAndWhereParam.table, db,
+                                    sGetTableAndWhereParam.where, whereArgs);
+                        }
                     }
                     break;
 
@@ -4444,6 +4467,11 @@ public class MediaProvider extends ContentProvider {
                     helper.mNumUpdates++;
                     count = db.update(sGetTableAndWhereParam.table, initialValues,
                         sGetTableAndWhereParam.where, whereArgs);
+                    if (count > 0) {
+                        helper.mNumQueries++;
+                        notifyMtpUpdated(sGetTableAndWhereParam.table, db,
+                                sGetTableAndWhereParam.where, whereArgs);
+                    }
                     break;
             }
         }
@@ -4453,6 +4481,20 @@ public class MediaProvider extends ContentProvider {
             getContext().getContentResolver().notifyChange(uri, null);
         }
         return count;
+    }
+
+    private void notifyMtpUpdated(String table, SQLiteDatabase db,
+            String userWhere, String[] whereArgs) {
+        Cursor c = db.query(table, ID_PROJECTION, userWhere, whereArgs, null, null, null);
+        if (c != null) {
+            try {
+                while (c.moveToNext()) {
+                    sendObjectUpdated(c.getLong(0));
+                }
+            } finally {
+                c.close();
+            }
+        }
     }
 
     private int movePlaylistEntry(DatabaseHelper helper, SQLiteDatabase db,
@@ -5326,7 +5368,7 @@ public class MediaProvider extends ContentProvider {
             } else if (EXTERNAL_VOLUME.equals(volume)) {
                 if (Environment.isExternalStorageRemovable()) {
                     final StorageVolume actualVolume = mStorageManager.getPrimaryVolume();
-                    final int volumeId = actualVolume.getFatVolumeId();
+                    final int volumeId = actualVolume.getVolumeId();
 
                     // Must check for failure!
                     // If the volume is not (yet) mounted, this will create a new
@@ -5339,8 +5381,8 @@ public class MediaProvider extends ContentProvider {
                                 Environment.MEDIA_MOUNTED_READ_ONLY.equals(state)) {
                             // This may happen if external storage was _just_ mounted.  It may also
                             // happen if the volume ID is _actually_ 0xffffffff, in which case it
-                            // must be changed since FileUtils::getFatVolumeId doesn't allow for
-                            // that.  It may also indicate that FileUtils::getFatVolumeId is broken
+                            // must be changed since FileUtils::getVolumeId doesn't allow for
+                            // that.  It may also indicate that FileUtils::getVolumeId is broken
                             // (missing ioctl), which is also impossible to disambiguate.
                             Log.e(TAG, "Can't obtain external volume ID even though it's mounted.");
                         } else {
